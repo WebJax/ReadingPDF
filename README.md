@@ -19,7 +19,7 @@ Additional security measures:
 
 ## Requirements
 
-* PHP 8.1+ with the `curl` and `fileinfo` extensions enabled
+* PHP 8.1+ with the `curl`, `fileinfo`, and `mbstring` extensions enabled
 * A web server (Apache / Nginx) or `php -S` for local development
 * A [Google Gemini API key](https://aistudio.google.com/app/apikey)
 

@@ -12,6 +12,18 @@
 
 declare(strict_types=1);
 
+// Allow up to 5 minutes for multi-chunk TTS conversions.
+set_time_limit(300);
+
+// ── mbstring requirement check ────────────────────────────────────────────────
+// The text-chunking code relies on mb_strlen / mb_str_split.
+if (!extension_loaded('mbstring')) {
+    http_response_code(500);
+    header('Content-Type: application/json; charset=UTF-8');
+    echo json_encode(['error' => 'PHP extension "mbstring" is required. Please enable it on the server.']);
+    exit;
+}
+
 // ── Security headers ────────────────────────────────────────────────────────
 header('Content-Type: application/json; charset=UTF-8');
 header('X-Content-Type-Options: nosniff');
@@ -72,6 +84,13 @@ if (!isset($_FILES['pdf']) || $_FILES['pdf']['error'] !== UPLOAD_ERR_OK) {
 
 $file = $_FILES['pdf'];
 
+// Verify this is a genuine HTTP upload (guards against path injection).
+if (!is_uploaded_file($file['tmp_name'])) {
+    http_response_code(400);
+    echo json_encode(['error' => 'Invalid file upload.']);
+    exit;
+}
+
 // Validate MIME type using finfo (not trusting the browser-supplied type).
 $finfo    = new finfo(FILEINFO_MIME_TYPE);
 $mimeType = $finfo->file($file['tmp_name']);
@@ -90,7 +109,12 @@ if ($file['size'] > $maxBytes) {
 }
 
 // ── Read & encode PDF ────────────────────────────────────────────────────────
-$pdfBytes  = file_get_contents($file['tmp_name']);
+$pdfBytes = file_get_contents($file['tmp_name']);
+if ($pdfBytes === false) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Failed to read uploaded PDF file from temporary storage.']);
+    exit;
+}
 $pdfBase64 = base64_encode($pdfBytes);
 
 // ── Step 1 : Extract clean text from the PDF via Gemini ─────────────────────

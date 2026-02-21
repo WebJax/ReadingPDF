@@ -9,6 +9,21 @@
 
 declare(strict_types=1);
 
+// ── Security headers ─────────────────────────────────────────────────────────
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('Cache-Control: no-store');
+header("Content-Security-Policy: default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; media-src blob:;");
+header('Referrer-Policy: strict-origin-when-cross-origin');
+
+// ── Secure session cookie params (must be set before session_start) ──────────
+session_set_cookie_params([
+    'lifetime' => 0,
+    'path'     => '/',
+    'secure'   => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+    'httponly' => true,
+    'samesite' => 'Strict',
+]);
 session_start();
 
 // Rotate the CSRF token on each full page load.
@@ -317,7 +332,24 @@ $maxMb = 20;
 
     function selectFile(file) {
         hideError();
-        if (file.type !== 'application/pdf') {
+
+        // Revoke any previous blob URL before accepting a new file,
+        // preventing stale results and Blob URL leaks across conversions.
+        if (audioPlayer.src && audioPlayer.src.startsWith('blob:')) {
+            URL.revokeObjectURL(audioPlayer.src);
+            audioPlayer.pause();
+            audioPlayer.removeAttribute('src');
+            audioPlayer.load();
+        }
+        resultSec.style.display  = 'none';
+        resetBtn.style.display   = 'none';
+        downloadBtn.href         = '#';
+
+        const mimeType     = file.type || '';
+        const fileNameLower = (file.name || '').toLowerCase();
+        const isPdfByType  = mimeType === 'application/pdf' || mimeType === 'application/x-pdf';
+        const isPdfByName  = fileNameLower.endsWith('.pdf');
+        if (!isPdfByType && !isPdfByName) {
             showError('Please select a PDF file.');
             return;
         }

@@ -13,50 +13,70 @@ declare(strict_types=1);
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('Cache-Control: no-store');
-header("Content-Security-Policy: default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; media-src blob:;");
+header("Content-Security-Policy: default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; media-src 'self' blob:; font-src https://fonts.gstatic.com; style-src-elem 'unsafe-inline' https://fonts.googleapis.com;");
 header('Referrer-Policy: strict-origin-when-cross-origin');
 
-// ── Secure session cookie params (must be set before session_start) ──────────
+// ── Secure session ──────────────────────────────────────────────────────────
+$isLocalDev = isset($_SERVER['HTTP_HOST']) && (str_ends_with($_SERVER['HTTP_HOST'], '.test') || $_SERVER['HTTP_HOST'] === 'localhost');
+$isSecure = !$isLocalDev && isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+
+session_name('PHPSESSID');
 session_set_cookie_params([
     'lifetime' => 0,
-    'path'     => '/',
-    'secure'   => isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off',
+    'path' => '/',
+    'domain' => '',
+    'secure' => $isSecure,
     'httponly' => true,
-    'samesite' => 'Strict',
+    'samesite' => $isLocalDev ? 'Lax' : 'Strict',
 ]);
 session_start();
 
-// Rotate the CSRF token on each full page load.
-$_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
 $csrfToken = $_SESSION['csrf_token'];
 
-// Maximum accepted file size shown in the UI (must match api/convert.php).
 $maxMb = 20;
 ?>
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ReadingPDF — PDF to Audiobook</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
 
         :root {
-            --bg:       #f4f6f9;
-            --surface:  #ffffff;
-            --primary:  #4f6ef7;
-            --primary-h:#3a57d6;
-            --text:     #1a1c23;
-            --muted:    #6b7280;
-            --border:   #d1d5db;
-            --danger:   #dc2626;
-            --success:  #16a34a;
-            --radius:   12px;
+            --bg: #0f1117;
+            --surface: #1a1d27;
+            --surface-2: #242836;
+            --primary: #6c7cff;
+            --primary-h: #8b97ff;
+            --primary-glow: rgba(108, 124, 255, .25);
+            --text: #e8eaf0;
+            --muted: #8b8fa3;
+            --border: #2e3347;
+            --danger: #ff5c5c;
+            --danger-bg: rgba(255, 92, 92, .1);
+            --success: #4ade80;
+            --success-bg: rgba(74, 222, 128, .1);
+            --warn: #fbbf24;
+            --radius: 14px;
         }
 
         body {
-            font-family: system-ui, -apple-system, sans-serif;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
@@ -68,11 +88,12 @@ $maxMb = 20;
 
         .card {
             background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: var(--radius);
-            box-shadow: 0 4px 24px rgba(0,0,0,.08);
+            box-shadow: 0 8px 40px rgba(0, 0, 0, .35), 0 0 80px rgba(108, 124, 255, .05);
             padding: 2.5rem 2rem;
             width: 100%;
-            max-width: 560px;
+            max-width: 580px;
         }
 
         h1 {
@@ -80,6 +101,10 @@ $maxMb = 20;
             font-weight: 700;
             text-align: center;
             margin-bottom: .25rem;
+            background: linear-gradient(135deg, #6c7cff, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
 
         .subtitle {
@@ -96,26 +121,36 @@ $maxMb = 20;
             padding: 2.5rem 1.5rem;
             text-align: center;
             cursor: pointer;
-            transition: border-color .2s, background .2s;
+            transition: border-color .25s, background .25s, box-shadow .25s;
+            background: var(--surface-2);
         }
+
         #drop-zone.drag-over,
         #drop-zone:hover {
             border-color: var(--primary);
-            background: #f0f3ff;
+            background: rgba(108, 124, 255, .06);
+            box-shadow: 0 0 20px var(--primary-glow);
         }
+
         #drop-zone svg {
             width: 48px;
             height: 48px;
             margin-bottom: .75rem;
             color: var(--primary);
         }
+
         #drop-zone p {
             font-size: .95rem;
             color: var(--muted);
         }
-        #drop-zone strong { color: var(--text); }
 
-        #file-input { display: none; }
+        #drop-zone strong {
+            color: var(--text);
+        }
+
+        #file-input {
+            display: none;
+        }
 
         #file-name {
             text-align: center;
@@ -126,48 +161,321 @@ $maxMb = 20;
             word-break: break-all;
         }
 
-        /* ── Convert button ── */
+        /* ── Tabs for Input ── */
+        .input-tabs {
+            display: flex;
+            background: var(--surface-2);
+            padding: .3rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+        }
+
+        .tab-btn {
+            flex: 1;
+            background: transparent;
+            border: none;
+            padding: .6rem;
+            font-size: .9rem;
+            font-weight: 600;
+            color: var(--muted);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all .2s;
+        }
+
+        .tab-btn.active {
+            background: var(--surface);
+            color: var(--text);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .input-pane {
+            display: none;
+        }
+
+        .input-pane.active {
+            display: block;
+            animation: paneFade .3s ease;
+        }
+
+        @keyframes paneFade {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        #raw-text-input {
+            width: 100%;
+            height: 180px;
+            padding: 1rem;
+            border: 2px dashed var(--border);
+            border-radius: var(--radius);
+            background: rgba(139, 143, 163, .03);
+            color: var(--text);
+            font-family: inherit;
+            font-size: .9rem;
+            resize: vertical;
+            transition: border-color .2s;
+        }
+
+        #raw-text-input:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .settings-group {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1.25rem;
+        }
+
+        .setting-item {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: .4rem;
+        }
+
+        .setting-item label {
+            font-size: .85rem;
+            font-weight: 600;
+            color: var(--muted);
+        }
+
+        .setting-item select {
+            width: 100%;
+            padding: .65rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--surface-2);
+            color: var(--text);
+            font-size: .9rem;
+            outline: none;
+            cursor: pointer;
+            transition: border-color .2s;
+        }
+
+        .setting-item select:focus,
+        .setting-item select:hover {
+            border-color: var(--primary);
+        }
+
+        .usage-badge {
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: .5rem;
+            font-size: .8rem;
+            color: var(--muted);
+            background: rgba(139, 143, 163, .05);
+            padding: .6rem 1rem;
+            border-radius: 99px;
+            border: 1px solid var(--border);
+            width: max-content;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .usage-badge svg {
+            width: 14px;
+            height: 14px;
+            color: var(--primary);
+        }
+
+        /* ── Buttons ── */
         #convert-btn {
             display: block;
             width: 100%;
             margin-top: 1.25rem;
-            padding: .75rem;
+            padding: .8rem;
             border: none;
             border-radius: var(--radius);
-            background: var(--primary);
+            background: linear-gradient(135deg, #6c7cff, #8b5cf6);
             color: #fff;
             font-size: 1rem;
             font-weight: 600;
             cursor: pointer;
-            transition: background .2s, opacity .2s;
+            transition: opacity .2s, box-shadow .2s, transform .1s;
+            box-shadow: 0 4px 15px rgba(108, 124, 255, .3);
         }
-        #convert-btn:hover:not(:disabled) { background: var(--primary-h); }
-        #convert-btn:disabled { opacity: .55; cursor: not-allowed; }
 
-        /* ── Progress ── */
-        #progress-section { margin-top: 1.5rem; display: none; }
-        #progress-label {
-            font-size: .875rem;
-            color: var(--muted);
-            margin-bottom: .5rem;
-            text-align: center;
+        #convert-btn:hover:not(:disabled) {
+            box-shadow: 0 6px 25px rgba(108, 124, 255, .45);
+            transform: translateY(-1px);
         }
-        #progress-bar-track {
-            height: 8px;
+
+        #convert-btn:disabled {
+            opacity: .4;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        /* ── Progress section ── */
+        #progress-section {
+            margin-top: 1.5rem;
+            display: none;
+        }
+
+        .progress-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+
+        .progress-header .elapsed {
+            font-size: .8rem;
+            color: var(--muted);
+            font-variant-numeric: tabular-nums;
+        }
+
+        .progress-header .eta {
+            font-size: .8rem;
+            color: var(--primary-h);
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Overall progress bar */
+        .progress-bar-track {
+            height: 6px;
             background: var(--border);
             border-radius: 99px;
             overflow: hidden;
+            margin-bottom: 1.25rem;
         }
-        #progress-bar {
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #6c7cff, #a78bfa);
+            border-radius: 99px;
+            width: 0%;
+            transition: width .4s ease;
+        }
+
+        /* Step list */
+        .steps {
+            list-style: none;
+        }
+
+        .steps li {
+            display: flex;
+            align-items: flex-start;
+            gap: .75rem;
+            padding: .55rem 0;
+            font-size: .88rem;
+            color: var(--muted);
+            transition: color .3s;
+        }
+
+        .steps li.active {
+            color: var(--text);
+        }
+
+        .steps li.done {
+            color: var(--muted);
+        }
+
+        .step-icon {
+            flex-shrink: 0;
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid var(--border);
+            transition: border-color .3s, background .3s;
+            margin-top: 1px;
+        }
+
+        .steps li.active .step-icon {
+            border-color: var(--primary);
+            background: var(--primary-glow);
+        }
+
+        .steps li.done .step-icon {
+            border-color: var(--success);
+            background: var(--success-bg);
+        }
+
+        /* Spinner inside active icon */
+        .step-icon .spinner {
+            width: 12px;
+            height: 12px;
+            border: 2px solid transparent;
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin .8s linear infinite;
+            display: none;
+        }
+
+        .steps li.active .step-icon .spinner {
+            display: block;
+        }
+
+        /* Check inside done icon */
+        .step-icon .check {
+            width: 10px;
+            height: 10px;
+            color: var(--success);
+            display: none;
+        }
+
+        .steps li.done .step-icon .check {
+            display: block;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .step-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .step-label {
+            font-weight: 500;
+        }
+
+        .step-detail {
+            font-size: .78rem;
+            color: var(--muted);
+            margin-top: 2px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .steps li.active .step-detail {
+            color: var(--primary-h);
+        }
+
+        /* TTS chunk sub-progress */
+        .chunk-bar-track {
+            height: 4px;
+            background: var(--border);
+            border-radius: 99px;
+            overflow: hidden;
+            margin-top: 6px;
+            max-width: 100%;
+        }
+
+        .chunk-bar-fill {
             height: 100%;
             background: var(--primary);
             border-radius: 99px;
             width: 0%;
-            transition: width .3s;
+            transition: width .3s ease;
         }
 
         /* ── Result ── */
-        #result-section { margin-top: 1.75rem; display: none; }
+        #result-section {
+            margin-top: 1.75rem;
+            display: none;
+        }
+
         #result-section h2 {
             font-size: 1.1rem;
             font-weight: 600;
@@ -178,10 +486,25 @@ $maxMb = 20;
             gap: .5rem;
         }
 
+        .result-stats {
+            font-size: .8rem;
+            color: var(--muted);
+            margin-bottom: 1rem;
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .result-stats span {
+            display: flex;
+            align-items: center;
+            gap: .35rem;
+        }
+
         audio {
             width: 100%;
             border-radius: 8px;
             margin-bottom: 1rem;
+            filter: invert(1) hue-rotate(180deg);
         }
 
         #download-btn {
@@ -190,7 +513,7 @@ $maxMb = 20;
             justify-content: center;
             gap: .5rem;
             width: 100%;
-            padding: .65rem;
+            padding: .7rem;
             border: 2px solid var(--primary);
             border-radius: var(--radius);
             background: transparent;
@@ -199,23 +522,27 @@ $maxMb = 20;
             font-weight: 600;
             cursor: pointer;
             text-decoration: none;
-            transition: background .2s, color .2s;
+            transition: background .2s, color .2s, box-shadow .2s;
         }
-        #download-btn:hover { background: var(--primary); color: #fff; }
+
+        #download-btn:hover {
+            background: var(--primary);
+            color: #fff;
+            box-shadow: 0 4px 15px rgba(108, 124, 255, .3);
+        }
 
         /* ── Error ── */
         #error-section {
             margin-top: 1.25rem;
             display: none;
             padding: .85rem 1rem;
-            background: #fef2f2;
-            border: 1px solid #fca5a5;
+            background: var(--danger-bg);
+            border: 1px solid rgba(255, 92, 92, .3);
             border-radius: var(--radius);
             color: var(--danger);
             font-size: .9rem;
         }
 
-        /* ── Reset ── */
         #reset-btn {
             display: none;
             margin-top: 1rem;
@@ -229,285 +556,683 @@ $maxMb = 20;
             cursor: pointer;
             transition: border-color .2s, color .2s;
         }
-        #reset-btn:hover { border-color: var(--text); color: var(--text); }
+
+        #reset-btn:hover {
+            border-color: var(--text);
+            color: var(--text);
+        }
+
+        #resume-btn {
+            display: none;
+            width: 100%;
+            margin-top: 1rem;
+            padding: .8rem;
+            border: none;
+            border-radius: var(--radius);
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, .3);
+            transition: transform .1s, box-shadow .2s;
+        }
+
+        #resume-btn:hover {
+            box-shadow: 0 6px 25px rgba(16, 185, 129, .45);
+            transform: translateY(-1px);
+        }
     </style>
 </head>
+
 <body>
-<div class="card">
-    <h1>📖 ReadingPDF</h1>
-    <p class="subtitle">Upload a PDF and convert it to a spoken-word audio file</p>
+    <div class="card">
+        <h1>📖 ReadingPDF</h1>
+        <p class="subtitle">Upload a PDF and convert it to a spoken-word audio file</p>
 
-    <form id="upload-form" novalidate>
-        <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
-
-        <div id="drop-zone" role="button" tabindex="0"
-             aria-label="Click or drag and drop a PDF file here">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
-                 stroke="currentColor" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                      d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+        <div id="usage-badge" class="usage-badge" style="display:none;">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
-            <p><strong>Click to browse</strong> or drag &amp; drop a PDF</p>
-            <p style="font-size:.8rem;margin-top:.3rem;">Max <?= $maxMb ?> MB</p>
+            <span>Brugt denne måned: <strong id="usage-text">...</strong></span>
         </div>
-        <input type="file" id="file-input" name="pdf" accept="application/pdf">
-        <p id="file-name"></p>
 
-        <button type="submit" id="convert-btn" disabled>Convert to Audiobook</button>
-    </form>
+        <form id="upload-form" novalidate>
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
 
-    <div id="progress-section" role="status" aria-live="polite">
-        <p id="progress-label">Uploading…</p>
-        <div id="progress-bar-track">
-            <div id="progress-bar"></div>
+            <div class="input-tabs">
+                <button type="button" class="tab-btn active" data-target="pane-pdf">Upload PDF</button>
+                <button type="button" class="tab-btn" data-target="pane-text">Indsæt Tekst</button>
+            </div>
+
+            <div id="pane-pdf" class="input-pane active">
+                <div id="drop-zone" role="button" tabindex="0" aria-label="Click or drag and drop a PDF file here">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                        aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                            d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+                    </svg>
+                    <p><strong>Click to browse</strong> or drag &amp; drop a PDF</p>
+                    <p style="font-size:.8rem;margin-top:.3rem;">Max <?= $maxMb ?> MB</p>
+                </div>
+                <input type="file" id="file-input" name="pdf" accept="application/pdf">
+                <p id="file-name"></p>
+            </div>
+
+            <div id="pane-text" class="input-pane">
+                <textarea id="raw-text-input" name="raw_text" placeholder="Indsæt artiklens tekst eller din bogtekst her..."></textarea>
+                <p style="text-align: center; font-size: .875rem; color: var(--muted); margin-top: .6rem; min-height: 1.25rem;">
+                    Tekst indtastet her vil springe AI-fasen over og gå direkte til lyd.
+                </p>
+            </div>
+
+            <div class="settings-group">
+                <div class="setting-item">
+                    <label for="voice-select">Stemme</label>
+                    <select id="voice-select" name="voice">
+                        <option value="da-DK-Journey-D">Journey Mand (AI)</option>
+                        <option value="da-DK-Journey-F">Journey Kvinde (AI)</option>
+                        <option value="da-DK-Wavenet-C">Wavenet Mand</option>
+                        <option value="da-DK-Wavenet-A">Wavenet Kvinde A</option>
+                        <option value="da-DK-Wavenet-D">Wavenet Kvinde D</option>
+                        <option value="da-DK-Standard-C" selected>Standard Mand</option>
+                        <option value="da-DK-Standard-E">Standard Kvinde</option>
+                    </select>
+                </div>
+                <div class="setting-item">
+                    <label for="speed-select">Hastighed</label>
+                    <select id="speed-select" name="speed">
+                        <option value="0.80">Meget langsom</option>
+                        <option value="0.90" selected>Lidt roligere</option>
+                        <option value="1.00">Normal hastighed</option>
+                        <option value="1.10">Lidt hurtigere</option>
+                    </select>
+                </div>
+            </div>
+
+            <button type="submit" id="convert-btn" disabled>Convert to Audiobook</button>
+        </form>
+
+        <!-- Progress section with step indicators -->
+        <div id="progress-section" role="status" aria-live="polite">
+            <div class="progress-header">
+                <span class="elapsed" id="elapsed-time">0:00</span>
+                <span class="eta" id="eta-time"></span>
+            </div>
+            <div class="progress-bar-track">
+                <div class="progress-bar-fill" id="progress-bar"></div>
+            </div>
+            <ul class="steps" id="step-list">
+                <li id="step-upload" class="active">
+                    <div class="step-icon">
+                        <div class="spinner"></div>
+                        <svg class="check" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 5.5L4 7.5L8 3" />
+                        </svg>
+                    </div>
+                    <div class="step-content">
+                        <div class="step-label">Uploading PDF</div>
+                        <div class="step-detail" id="upload-detail"></div>
+                    </div>
+                </li>
+                <li id="step-extract">
+                    <div class="step-icon">
+                        <div class="spinner"></div>
+                        <svg class="check" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 5.5L4 7.5L8 3" />
+                        </svg>
+                    </div>
+                    <div class="step-content">
+                        <div class="step-label">Extracting text with AI</div>
+                        <div class="step-detail" id="extract-detail"></div>
+                    </div>
+                </li>
+                <li id="step-tts">
+                    <div class="step-icon">
+                        <div class="spinner"></div>
+                        <svg class="check" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 5.5L4 7.5L8 3" />
+                        </svg>
+                    </div>
+                    <div class="step-content">
+                        <div class="step-label">Generating speech</div>
+                        <div class="step-detail" id="tts-detail"></div>
+                        <div class="chunk-bar-track" id="chunk-bar-track" style="display:none;">
+                            <div class="chunk-bar-fill" id="chunk-bar"></div>
+                        </div>
+                    </div>
+                </li>
+                <li id="step-build">
+                    <div class="step-icon">
+                        <div class="spinner"></div>
+                        <svg class="check" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M2 5.5L4 7.5L8 3" />
+                        </svg>
+                    </div>
+                    <div class="step-content">
+                        <div class="step-label">Building audio file</div>
+                        <div class="step-detail" id="build-detail"></div>
+                    </div>
+                </li>
+            </ul>
         </div>
+
+        <div id="error-section" role="alert" aria-live="assertive"></div>
+
+        <div id="result-section">
+            <h2>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24"
+                    stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+                Your audiobook is ready!
+            </h2>
+            <div class="result-stats" id="result-stats"></div>
+            <audio id="audio-player" controls preload="auto"></audio>
+            
+            <div class="download-container" style="display: flex; gap: 1rem; margin-top: 1rem;">
+                <a id="download-btn" class="primary-btn" download="audiobook.wav" href="#">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24"
+                        stroke="currentColor" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Download WAV
+                </a>
+                
+                <a id="download-text-btn" class="primary-btn" style="background: var(--surface-2); color: var(--text);" download="tekst.txt" href="#">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24"
+                        stroke="currentColor" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    Download Tekst
+                </a>
+            </div>
+        </div>
+        
+        <button id="resume-btn" type="button">Genoptag opgave</button>
+
+        <button id="reset-btn" type="button">Convert another PDF</button>
     </div>
 
-    <div id="error-section" role="alert" aria-live="assertive"></div>
+    <script>
+        (function () {
+            'use strict';
 
-    <div id="result-section">
-        <h2>
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none"
-                 viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M5 13l4 4L19 7"/>
-            </svg>
-            Your audiobook is ready!
-        </h2>
-        <audio id="audio-player" controls preload="auto"></audio>
-        <a id="download-btn" download="audiobook.wav" href="#">
-            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none"
-                 viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
-            </svg>
-            Download WAV
-        </a>
-    </div>
+            const $ = id => document.getElementById(id);
 
-    <button id="reset-btn" type="button">Convert another PDF</button>
-</div>
+            const dropZone = $('drop-zone');
+            const fileInput = $('file-input');
+            const fileNameEl = $('file-name');
+            const convertBtn = $('convert-btn');
+            const uploadForm = $('upload-form');
+            const progressSec = $('progress-section');
+            const progressBar = $('progress-bar');
+            const elapsedEl = $('elapsed-time');
+            const etaEl = $('eta-time');
+            const errorSec = $('error-section');
+            const resultSec = $('result-section');
+            const resultStats = $('result-stats');
+            const audioPlayer = $('audio-player');
+            const downloadBtn = $('download-btn');
+            const downloadTextBtn = $('download-text-btn');
+            const resetBtn = $('reset-btn');
+            const resumeBtn = $('resume-btn');
+            
+            // Tab logic
+            const tabBtns = document.querySelectorAll('.tab-btn');
+            const inputPanes = document.querySelectorAll('.input-pane');
+            let currentInputType = 'pdf'; // 'pdf' or 'text'
+            
+            tabBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    tabBtns.forEach(b => b.classList.remove('active'));
+                    inputPanes.forEach(p => p.classList.remove('active'));
+                    btn.classList.add('active');
+                    $(btn.dataset.target).classList.add('active');
+                    currentInputType = btn.dataset.target === 'pane-pdf' ? 'pdf' : 'text';
+                    validateForm();
+                });
+            });
 
-<script>
-(function () {
-    'use strict';
+            const MAX_BYTES = <?= $maxMb ?> * 1024 * 1024;
 
-    const dropZone      = document.getElementById('drop-zone');
-    const fileInput     = document.getElementById('file-input');
-    const fileName      = document.getElementById('file-name');
-    const convertBtn    = document.getElementById('convert-btn');
-    const uploadForm    = document.getElementById('upload-form');
-    const progressSec   = document.getElementById('progress-section');
-    const progressLabel = document.getElementById('progress-label');
-    const progressBar   = document.getElementById('progress-bar');
-    const errorSec      = document.getElementById('error-section');
-    const resultSec     = document.getElementById('result-section');
-    const audioPlayer   = document.getElementById('audio-player');
-    const downloadBtn   = document.getElementById('download-btn');
-    const resetBtn      = document.getElementById('reset-btn');
+            // Step elements
+            const steps = ['upload', 'extract', 'tts', 'build'];
+            const stepEls = Object.fromEntries(steps.map(s => [s, $('step-' + s)]));
+            const detailEls = Object.fromEntries(steps.map(s => [s, $(s + '-detail')]));
 
-    const MAX_BYTES = <?= $maxMb ?> * 1024 * 1024;
+            // ── Timing state ────────────────────────────────────────────────────────
+            let conversionStartTime = null;
+            let elapsedTimer = null;
+            let ttsChunkTimes = [];       // Duration of each completed TTS chunk (seconds)
+            let ttsStartTime = null;      // When the first TTS chunk started
+            let totalChunks = 0;
+            let completedChunks = 0;
+            let extractionTime = 0;       // How long text extraction took
 
-    // ── File selection ────────────────────────────────────────────────────────
-    dropZone.addEventListener('click', () => fileInput.click());
-    dropZone.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
-    });
-
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.classList.add('drag-over');
-    });
-    dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('drag-over');
-        const files = e.dataTransfer.files;
-        if (files.length) selectFile(files[0]);
-    });
-
-    fileInput.addEventListener('change', () => {
-        if (fileInput.files.length) selectFile(fileInput.files[0]);
-    });
-
-    function selectFile(file) {
-        hideError();
-
-        // Revoke any previous blob URL before accepting a new file,
-        // preventing stale results and Blob URL leaks across conversions.
-        if (audioPlayer.src && audioPlayer.src.startsWith('blob:')) {
-            URL.revokeObjectURL(audioPlayer.src);
-            audioPlayer.pause();
-            audioPlayer.removeAttribute('src');
-            audioPlayer.load();
-        }
-        resultSec.style.display  = 'none';
-        resetBtn.style.display   = 'none';
-        downloadBtn.href         = '#';
-
-        const mimeType     = file.type || '';
-        const fileNameLower = (file.name || '').toLowerCase();
-        const isPdfByType  = mimeType === 'application/pdf' || mimeType === 'application/x-pdf';
-        const isPdfByName  = fileNameLower.endsWith('.pdf');
-        if (!isPdfByType && !isPdfByName) {
-            showError('Please select a PDF file.');
-            return;
-        }
-        if (file.size > MAX_BYTES) {
-            showError('File is too large. Maximum size is <?= $maxMb ?> MB.');
-            return;
-        }
-        // Replace the FileList in the hidden input with a DataTransfer trick.
-        const dt = new DataTransfer();
-        dt.items.add(file);
-        fileInput.files = dt.files;
-
-        fileName.textContent = file.name + ' (' + formatBytes(file.size) + ')';
-        convertBtn.disabled = false;
-    }
-
-    // ── Form submit ───────────────────────────────────────────────────────────
-    uploadForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        hideError();
-
-        if (!fileInput.files.length) {
-            showError('Please select a PDF file first.');
-            return;
-        }
-
-        const formData = new FormData(uploadForm);
-        startConversion(formData);
-    });
-
-    function startConversion(formData) {
-        setUiState('loading');
-
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', 'api/convert.php', true);
-
-        // Upload progress (0 → 50 %).
-        xhr.upload.addEventListener('progress', (e) => {
-            if (e.lengthComputable) {
-                const pct = Math.round((e.loaded / e.total) * 50);
-                setProgress(pct, 'Uploading…');
+            // ── Fetch Usage ─────────────────────────────────────────────────────────
+            async function fetchUsage() {
+                try {
+                    const res = await fetch('api/usage.php');
+                    if (res.ok) {
+                        const data = await res.json();
+                        $('usage-badge').style.display = 'flex';
+                        $('usage-text').textContent = data.chars_used.toLocaleString('da-DK') + ' / ' + data.limit.toLocaleString('da-DK') + ' tegn';
+                    }
+                } catch (e) {
+                    console.error('Could not load usage data', e);
+                }
             }
-        });
+            fetchUsage();
 
-        xhr.upload.addEventListener('load', () => {
-            setProgress(50, 'Converting PDF to text…');
-            // Animate the bar from 50 % to 90 % during server processing.
-            animateProgress(50, 90, 15000, 'Generating audio…');
-        });
+            function startElapsedTimer() {
+                conversionStartTime = performance.now();
+                elapsedTimer = setInterval(() => {
+                    const sec = Math.floor((performance.now() - conversionStartTime) / 1000);
+                    elapsedEl.textContent = formatTime(sec);
+                }, 500);
+            }
+            function stopElapsedTimer() {
+                if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+            }
 
-        xhr.addEventListener('load', () => {
-            clearProgressAnimation();
-            setProgress(100, 'Done!');
+            function formatTime(totalSec) {
+                const m = Math.floor(totalSec / 60);
+                const s = totalSec % 60;
+                return m + ':' + String(s).padStart(2, '0');
+            }
 
-            let data;
-            try {
-                data = JSON.parse(xhr.responseText);
-            } catch {
-                showError('Unexpected server response. Please try again.');
+            function updateEta() {
+                if (completedChunks < 1 || totalChunks <= 0) {
+                    etaEl.textContent = '';
+                    return;
+                }
+                const avgChunkTime = ttsChunkTimes.reduce((a, b) => a + b, 0) / ttsChunkTimes.length;
+                const remainingChunks = totalChunks - completedChunks;
+                const etaSec = Math.ceil(remainingChunks * avgChunkTime);
+                if (etaSec > 0) {
+                    etaEl.textContent = '~' + formatTime(etaSec) + ' remaining';
+                } else {
+                    etaEl.textContent = 'Almost done…';
+                }
+            }
+
+            // ── Step management ─────────────────────────────────────────────────────
+            function activateStep(name) {
+                for (const s of steps) {
+                    const el = stepEls[s];
+                    if (s === name) {
+                        el.classList.remove('done');
+                        el.classList.add('active');
+                    } else if (steps.indexOf(s) < steps.indexOf(name)) {
+                        el.classList.remove('active');
+                        el.classList.add('done');
+                    } else {
+                        el.classList.remove('active', 'done');
+                    }
+                }
+            }
+
+            function completeStep(name) {
+                stepEls[name].classList.remove('active');
+                stepEls[name].classList.add('done');
+            }
+
+            function completeAllSteps() {
+                for (const s of steps) {
+                    stepEls[s].classList.remove('active');
+                    stepEls[s].classList.add('done');
+                }
+            }
+
+            function resetSteps() {
+                for (const s of steps) {
+                    stepEls[s].classList.remove('active', 'done');
+                    detailEls[s].textContent = '';
+                }
+                $('chunk-bar-track').style.display = 'none';
+                $('chunk-bar').style.width = '0%';
+                etaEl.textContent = '';
+                progressBar.style.width = '0%';
+            }
+
+            // Overall progress: upload=0-10%, extract=10-30%, tts=30-90%, build=90-100%
+            function setOverallProgress(pct) {
+                progressBar.style.width = Math.min(100, Math.max(0, pct)) + '%';
+            }
+
+            // ── File & Text selection ─────────────────────────────────────────────
+            $('raw-text-input').addEventListener('input', validateForm);
+
+            function validateForm() {
+                if (currentInputType === 'pdf') {
+                    convertBtn.disabled = !fileInput.files.length;
+                } else {
+                    convertBtn.disabled = $('raw-text-input').value.trim() === '';
+                }
+            }
+
+            dropZone.addEventListener('click', () => fileInput.click());
+            dropZone.addEventListener('keydown', e => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+            });
+
+            dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+            dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+            dropZone.addEventListener('drop', e => {
+                e.preventDefault(); dropZone.classList.remove('drag-over');
+                if (e.dataTransfer.files.length) selectFile(e.dataTransfer.files[0]);
+            });
+
+            fileInput.addEventListener('change', () => {
+                if (fileInput.files.length) selectFile(fileInput.files[0]);
+            });
+
+            function selectFile(file) {
+                hideError();
+                if (audioPlayer.src && audioPlayer.src.startsWith('blob:')) {
+                    URL.revokeObjectURL(audioPlayer.src);
+                    audioPlayer.pause();
+                    audioPlayer.removeAttribute('src');
+                    audioPlayer.load();
+                }
+                resultSec.style.display = 'none';
+                resetBtn.style.display = 'none';
+                downloadBtn.href = '#';
+
+                const mime = file.type || '';
+                const lower = (file.name || '').toLowerCase();
+                if (mime !== 'application/pdf' && mime !== 'application/x-pdf' && !lower.endsWith('.pdf')) {
+                    showError('Please select a PDF file.'); return;
+                }
+                if (file.size > MAX_BYTES) {
+                    showError('File is too large. Maximum size is <?= $maxMb ?> MB.'); return;
+                }
+
+                const dt = new DataTransfer();
+                dt.items.add(file);
+                fileInput.files = dt.files;
+                fileNameEl.textContent = file.name + ' (' + formatBytes(file.size) + ')';
+                validateForm();
+            }
+
+            // ── Form submit ─────────────────────────────────────────────────────────
+            uploadForm.addEventListener('submit', e => {
+                e.preventDefault();
+                hideError();
+                
+                if (currentInputType === 'pdf') {
+                    if (!fileInput.files.length) { showError('Vælg en PDF fil først.'); return; }
+                } else {
+                    if ($('raw-text-input').value.trim() === '') { showError('Indsæt venligst noget tekst i feltet.'); return; }
+                }
+
+                startConversion(new FormData(uploadForm));
+            });
+
+            async function startConversion(formData) {
+                setUiState('loading');
+                resetSteps();
+                activateStep('upload');
+                detailEls.upload.textContent = 'Sending file to server…';
+                setOverallProgress(5);
+
+                // Reset timing
+                ttsChunkTimes = [];
+                ttsStartTime = null;
+                totalChunks = 0;
+                completedChunks = 0;
+                extractionTime = 0;
+                startElapsedTimer();
+
+                let response;
+                try {
+                    response = await fetch('api/convert.php', {
+                        method: 'POST',
+                        body: formData,
+                        credentials: 'same-origin',
+                    });
+                } catch (err) {
+                    stopElapsedTimer();
+                    showError('Network error. Please check your connection and try again.');
+                    setUiState('idle');
+                    return;
+                }
+
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    stopElapsedTimer();
+                    showError(data.error || 'Server error.');
+                    setUiState('idle');
+                    return;
+                }
+
+                const jobId = data.job_id;
+                completeStep('upload');
+                detailEls.upload.textContent = 'Uploaded & Queued';
+                setOverallProgress(10);
+
+                // ── Start Polling ──────────────────────────────────────────────────
+                pollJobStatus(jobId);
+            }
+
+            async function pollJobStatus(jobId) {
+                const interval = 1500; // 1.5s
+                let chunkStartTime = null;
+                let lastChunk = 0;
+
+                const poll = async () => {
+                    try {
+                        const response = await fetch('api/status.php?id=' + jobId);
+                        if (!response.ok) throw new Error('Status check failed');
+
+                        const job = await response.json();
+
+                        if (job.step === 'error') {
+                            stopElapsedTimer();
+                            showError(job.error || 'Job failed.');
+                            resumeBtn.style.display = 'block';
+                            resumeBtn.dataset.jobid = jobId;
+                            setUiState('error');
+                            return;
+                        }
+
+                        switch (job.step) {
+                            case 'extracting':
+                                activateStep('extract');
+                                detailEls.extract.textContent = 'Reading PDF with Gemini AI…';
+                                setOverallProgress(15);
+                                break;
+
+                            case 'extracted':
+                                completeStep('extract');
+                                totalChunks = job.totalChunks || 1;
+                                detailEls.extract.textContent =
+                                    formatNumber(job.charCount) + ' characters · ' +
+                                    totalChunks + ' audio chunk' + (totalChunks !== 1 ? 's' : '');
+                                setOverallProgress(30);
+                                break;
+
+                            case 'tts_start':
+                                activateStep('tts');
+                                $('chunk-bar-track').style.display = 'block';
+                                detailEls.tts.textContent =
+                                    'Chunk ' + job.chunk + ' of ' + job.totalChunks +
+                                    ' (' + formatNumber(job.chunkChars) + ' chars)';
+
+                                if (job.chunk !== lastChunk) {
+                                    chunkStartTime = performance.now();
+                                    lastChunk = job.chunk;
+                                }
+
+                                const chunkProgressStart = ((job.chunk - 1) / job.totalChunks) * 100;
+                                $('chunk-bar').style.width = chunkProgressStart + '%';
+                                setOverallProgress(30 + (chunkProgressStart / 100) * 60);
+                                break;
+
+                            case 'tts_done': {
+                                if (job.chunk > completedChunks) {
+                                    if (chunkStartTime) {
+                                        const chunkDur = (performance.now() - chunkStartTime) / 1000;
+                                        ttsChunkTimes.push(chunkDur);
+                                        chunkStartTime = null; // Wait for next start
+                                    }
+                                    completedChunks = job.chunk;
+                                }
+
+                                const chunkPct = (job.chunk / job.totalChunks) * 100;
+                                $('chunk-bar').style.width = chunkPct + '%';
+                                detailEls.tts.textContent =
+                                    'Chunk ' + job.chunk + ' of ' + job.totalChunks + ' ✓';
+                                setOverallProgress(30 + (chunkPct / 100) * 60);
+                                updateEta();
+
+                                if (job.chunk >= job.totalChunks) {
+                                    completeStep('tts');
+                                    etaEl.textContent = 'Almost done…';
+                                }
+                                break;
+                            }
+
+                            case 'building':
+                                activateStep('build');
+                                detailEls.build.textContent = 'Combining audio chunks into WAV…';
+                                setOverallProgress(92);
+                                etaEl.textContent = 'Almost done…';
+                                break;
+
+                            case 'done':
+                                completeAllSteps();
+                                detailEls.build.textContent = 'Complete';
+                                setOverallProgress(100);
+                                stopElapsedTimer();
+                                etaEl.textContent = '';
+                                fetchUsage(); // Refresh usage after job succeeds
+
+                                // Show result
+                                audioPlayer.src = job.audio_url;
+                                downloadBtn.href = job.audio_url;
+                                
+                                downloadTextBtn.href = 'api/download_text.php?id=' + jobId;
+                                downloadTextBtn.download = dlName + '_tekst.txt';
+                                
+                                downloadTextBtn.href = 'api/download_text.php?id=' + jobId;
+                                downloadTextBtn.download = dlName + '_tekst.txt';
+
+                                // Show stats
+                                const totalSec = Math.round(job.elapsed);
+                                const audioSizeMb = (job.audio_size / (1024 * 1024)).toFixed(1);
+                                resultStats.innerHTML =
+                                    '<span>⏱ ' + formatTime(totalSec) + ' total</span>' +
+                                    '<span>📦 ' + audioSizeMb + ' MB</span>' +
+                                    (job.totalChunks > 1 ? '<span>🔊 ' + job.totalChunks + ' chunks</span>' : '');
+
+                                setUiState('done');
+                                return; // Stop polling
+                        }
+
+                        // Continue polling
+                        setTimeout(poll, interval);
+
+                    } catch (err) {
+                        console.error('[ReadingPDF] Polling error:', err);
+                        setTimeout(poll, interval); // Try again
+                    }
+                };
+
+                poll();
+            }
+
+            // ── Reset & Resume ──────────────────────────────────────────────────────
+            resetBtn.addEventListener('click', () => {
+                if (audioPlayer.src) URL.revokeObjectURL(audioPlayer.src);
+                audioPlayer.src = '';
+                downloadBtn.href = '#';
+                fileInput.value = '';
+                fileNameEl.textContent = '';
+                convertBtn.disabled = true;
+                hideError();
                 setUiState('idle');
-                return;
+            });
+
+            resumeBtn.addEventListener('click', async () => {
+                resumeBtn.style.display = 'none';
+                hideError();
+                setUiState('loading');
+                
+                const jobId = resumeBtn.dataset.jobid;
+                const formData = new FormData();
+                formData.append('job_id', jobId);
+                
+                try {
+                    const response = await fetch('api/resume.php', {
+                        method: 'POST',
+                        body: formData,
+                        credentials: 'same-origin',
+                    });
+                    const data = await response.json();
+                    if (!response.ok || !data.success) {
+                        showError(data.error || 'Resume failed.');
+                        resumeBtn.style.display = 'block';
+                        setUiState('error');
+                        return;
+                    }
+                    startElapsedTimer();
+                    pollJobStatus(jobId);
+                } catch (err) {
+                    showError('Network error during resume.');
+                    resumeBtn.style.display = 'block';
+                    setUiState('error');
+                }
+            });
+
+            // ── UI helpers ───────────────────────────────────────────────────────────
+            function setUiState(state) {
+                progressSec.style.display = (state === 'loading' || state === 'error') ? 'block' : 'none';
+                resultSec.style.display = state === 'done' ? 'block' : 'none';
+                resetBtn.style.display = state === 'done' ? 'block' : 'none';
+                convertBtn.disabled = state !== 'idle';
+                dropZone.style.pointerEvents = (state === 'loading' || state === 'error') ? 'none' : '';
+                if (state === 'idle') {
+                    resetSteps();
+                    stopElapsedTimer();
+                    resumeBtn.style.display = 'none';
+                }
             }
 
-            if (!data.success) {
-                showError(data.error || 'An unknown error occurred.');
-                setUiState('idle');
-                return;
+            function showError(msg) {
+                errorSec.textContent = msg;
+                errorSec.style.display = 'block';
+            }
+            function hideError() {
+                errorSec.style.display = 'none';
+                errorSec.textContent = '';
             }
 
-            // Build a Blob from the base64 WAV data and wire up the UI.
-            const wavBytes  = base64ToUint8Array(data.audio);
-            const blob      = new Blob([wavBytes], { type: data.mimeType });
-            const objectUrl = URL.createObjectURL(blob);
+            function formatBytes(bytes) {
+                if (bytes < 1024) return bytes + ' B';
+                if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+            }
 
-            audioPlayer.src = objectUrl;
-            downloadBtn.href = objectUrl;
-            downloadBtn.download = fileInput.files[0].name.replace(/\.pdf$/i, '') + '.wav';
+            function formatNumber(n) {
+                return n.toLocaleString('en-US');
+            }
 
-            setUiState('done');
-        });
-
-        xhr.addEventListener('error', () => {
-            clearProgressAnimation();
-            showError('Network error. Please check your connection and try again.');
-            setUiState('idle');
-        });
-
-        xhr.send(formData);
-    }
-
-    // ── Reset ─────────────────────────────────────────────────────────────────
-    resetBtn.addEventListener('click', () => {
-        if (audioPlayer.src) URL.revokeObjectURL(audioPlayer.src);
-        audioPlayer.src = '';
-        downloadBtn.href = '#';
-        fileInput.value = '';
-        fileName.textContent = '';
-        convertBtn.disabled = true;
-        hideError();
-        setUiState('idle');
-    });
-
-    // ── UI state helpers ──────────────────────────────────────────────────────
-    function setUiState(state) {
-        progressSec.style.display = state === 'loading' ? 'block' : 'none';
-        resultSec.style.display   = state === 'done'    ? 'block' : 'none';
-        resetBtn.style.display    = state === 'done'    ? 'block' : 'none';
-        convertBtn.disabled       = state !== 'idle';
-        dropZone.style.pointerEvents = state === 'loading' ? 'none' : '';
-
-        if (state === 'idle') {
-            setProgress(0, '');
-        }
-    }
-
-    let _animFrame = null;
-    function animateProgress(from, to, durationMs, label) {
-        const start = performance.now();
-        function step(now) {
-            const elapsed = now - start;
-            const pct = Math.min(from + (to - from) * (elapsed / durationMs), to);
-            setProgress(Math.round(pct), label);
-            if (pct < to) _animFrame = requestAnimationFrame(step);
-        }
-        _animFrame = requestAnimationFrame(step);
-    }
-    function clearProgressAnimation() {
-        if (_animFrame !== null) { cancelAnimationFrame(_animFrame); _animFrame = null; }
-    }
-
-    function setProgress(pct, label) {
-        progressBar.style.width   = pct + '%';
-        progressLabel.textContent = label;
-    }
-
-    function showError(msg) {
-        errorSec.textContent = msg;
-        errorSec.style.display = 'block';
-    }
-    function hideError() {
-        errorSec.style.display = 'none';
-        errorSec.textContent = '';
-    }
-
-    // ── Utilities ─────────────────────────────────────────────────────────────
-    function formatBytes(bytes) {
-        if (bytes < 1024) return bytes + ' B';
-        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-    }
-
-    function base64ToUint8Array(b64) {
-        const bin = atob(b64);
-        const arr = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-        return arr;
-    }
-}());
-</script>
+            function base64ToUint8Array(b64) {
+                const bin = atob(b64);
+                const arr = new Uint8Array(bin.length);
+                for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+                return arr;
+            }
+        }());
+    </script>
 </body>
+
 </html>

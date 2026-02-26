@@ -2,3 +2,7 @@ config.php
 uploads/
 *.log
 .env
+storage/audio/*
+storage/jobs/*
+storage/logs/*
+storage/usage.json

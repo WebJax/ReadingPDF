@@ -114,7 +114,6 @@ try {
     ]);
 
     // ── Step 2 : TTS ───────────────────────────────────────────────────────
-    $pcmParts = [];
     $chunkDir = "{$baseDir}/storage/jobs/{$jobId}_chunks";
     if (!is_dir($chunkDir)) {
         mkdir($chunkDir, 0755, true);
@@ -153,7 +152,7 @@ try {
             file_put_contents($chunkFile, $audioData);
         }
 
-        $pcmParts[] = $audioData;
+        // $pcmParts is no longer needed; appending directly to disk in Step 3
 
         updateJob($jobFile, [
             'step' => 'tts_done',
@@ -163,19 +162,66 @@ try {
         ]);
     }
 
-    // ── Step 3 : Build WAV ──────────────────────────────────────────────────
+    // ── Step 3 : Build WAV (Streamed to avoid OOM) ──────────────────────────
     updateJob($jobFile, ['step' => 'building', 'elapsed' => round(microtime(true) - $startTime, 2)]);
 
-    $combinedPcm = implode('', $pcmParts);
-    $wav = buildWavFile($combinedPcm);
-
     $outputPath = "{$audioDir}/{$jobId}.wav";
-    file_put_contents($outputPath, $wav);
+    $outFp = fopen($outputPath, 'wb');
+    if (!$outFp) {
+        throw new Exception("Could not open output WAV file for writing: {$outputPath}");
+    }
+
+    // Write a dummy 44-byte WAV header first. We will overwrite it at the end.
+    $dummyHeader = str_repeat("\0", 44);
+    fwrite($outFp, $dummyHeader);
+
+    $totalPcmBytes = 0;
+
+    foreach ($chunks as $i => $chunk) {
+        $chunkNum = $i + 1;
+        $chunkFile = "{$chunkDir}/chunk_{$chunkNum}.raw";
+
+        if (file_exists($chunkFile)) {
+            $chunkData = file_get_contents($chunkFile);
+            fwrite($outFp, $chunkData);
+            $totalPcmBytes += strlen($chunkData);
+        } else {
+            // Fault tolerance: skip missing chunks instead of crashing the whole assembly
+            logMessage($logFile, "[$jobId] Warning: Chunk {$chunkNum} is missing during assembly. Skipping.");
+        }
+    }
+
+    // Now calculate and write the real WAV header
+    $sampleRate = 24000;
+    $channels = 1;
+    $bits = 16;
+    $byteRate = $sampleRate * $channels * ($bits / 8);
+    $blockAlign = $channels * ($bits / 8);
+
+    $realHeader = 'RIFF' .
+        pack('V', 36 + $totalPcmBytes) .
+        'WAVEfmt ' .
+        pack('V', 16) .
+        pack('v', 1) .
+        pack('v', $channels) .
+        pack('V', $sampleRate) .
+        pack('V', $byteRate) .
+        pack('v', $blockAlign) .
+        pack('v', $bits) .
+        'data' .
+        pack('V', $totalPcmBytes);
+
+    // Rewind and overwrite dummy header
+    rewind($outFp);
+    fwrite($outFp, $realHeader);
+    fclose($outFp);
+
+    $finalSize = filesize($outputPath);
 
     updateJob($jobFile, [
         'step' => 'done',
         'audio_url' => "api/download.php?id={$jobId}",
-        'audio_size' => strlen($wav),
+        'audio_size' => $finalSize,
         'elapsed' => round(microtime(true) - $startTime, 2)
     ]);
 
@@ -184,7 +230,7 @@ try {
     // Clean up upload is REMOVED to keep intermediate files for debugging.
     // @unlink($pdfPath);
 
-} catch (Exception $e) {
+} catch (Throwable $e) {
     $errorMessage = $e->getMessage();
 
     // Friendly quota error

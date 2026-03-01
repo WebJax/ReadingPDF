@@ -582,6 +582,60 @@ $maxMb = 20;
             box-shadow: 0 6px 25px rgba(16, 185, 129, .45);
             transform: translateY(-1px);
         }
+
+        /* ── Cloud upload ── */
+        .cloud-upload-section {
+            margin-top: 1rem;
+        }
+
+        .cloud-upload-label {
+            font-size: .78rem;
+            color: var(--muted);
+            text-align: center;
+            margin-bottom: .6rem;
+        }
+
+        .cloud-btn-group {
+            display: flex;
+            gap: .75rem;
+        }
+
+        .cloud-btn {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: .45rem;
+            padding: .6rem .5rem;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--surface-2);
+            color: var(--text);
+            font-size: .88rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: border-color .2s, background .2s;
+            font-family: inherit;
+        }
+
+        .cloud-btn:hover:not(:disabled) {
+            border-color: var(--primary);
+            background: rgba(108, 124, 255, .07);
+        }
+
+        .cloud-btn:disabled {
+            opacity: .45;
+            cursor: not-allowed;
+        }
+
+        #cloud-upload-status {
+            margin-top: .65rem;
+            font-size: .82rem;
+            text-align: center;
+            padding: .5rem .75rem;
+            border-radius: 8px;
+            background: rgba(139, 143, 163, .06);
+        }
     </style>
 </head>
 
@@ -753,6 +807,28 @@ $maxMb = 20;
                     Download Tekst
                 </a>
             </div>
+
+            <div class="cloud-upload-section">
+                <p class="cloud-upload-label">☁️ Save to cloud storage</p>
+                <div class="cloud-btn-group">
+                    <button id="onedrive-btn" class="cloud-btn" type="button">
+                        <!-- Microsoft OneDrive icon -->
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                            <path d="M19.35 10.03A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.03A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.97z"/>
+                        </svg>
+                        OneDrive
+                    </button>
+                    <button id="icloud-btn" class="cloud-btn" type="button">
+                        <!-- Cloud / iCloud icon -->
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/>
+                        </svg>
+                        iCloud
+                    </button>
+                </div>
+                <div id="cloud-upload-status" style="display:none;"></div>
+            </div>
         </div>
         
         <button id="resume-btn" type="button">Genoptag opgave</button>
@@ -783,6 +859,11 @@ $maxMb = 20;
             const downloadTextBtn = $('download-text-btn');
             const resetBtn = $('reset-btn');
             const resumeBtn = $('resume-btn');
+            const onedriveBtn = $('onedrive-btn');
+            const icloudBtn   = $('icloud-btn');
+            const cloudStatus = $('cloud-upload-status');
+
+            let currentJobId = null;
             
             // Tab logic
             const tabBtns = document.querySelectorAll('.tab-btn');
@@ -1115,6 +1196,12 @@ $maxMb = 20;
                                 etaEl.textContent = '';
                                 fetchUsage(); // Refresh usage after job succeeds
 
+                                // Track job for cloud upload
+                                currentJobId = jobId;
+                                onedriveBtn.disabled = false;
+                                icloudBtn.disabled = false;
+                                cloudStatus.style.display = 'none';
+
                                 // Show result
                                 audioPlayer.src = job.audio_url;
                                 downloadBtn.href = job.audio_url;
@@ -1157,6 +1244,8 @@ $maxMb = 20;
                 fileInput.value = '';
                 fileNameEl.textContent = '';
                 convertBtn.disabled = true;
+                currentJobId = null;
+                cloudStatus.style.display = 'none';
                 hideError();
                 setUiState('idle');
             });
@@ -1231,6 +1320,98 @@ $maxMb = 20;
                 for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
                 return arr;
             }
+
+            // ── Cloud upload ─────────────────────────────────────────────────────────
+
+            function showCloudStatus(msg, isError = false) {
+                cloudStatus.textContent = msg;
+                cloudStatus.style.display = 'block';
+                cloudStatus.style.color = isError ? 'var(--danger)' : 'var(--success)';
+            }
+
+            // Listen for result messages sent back from the OAuth popup window.
+            window.addEventListener('message', (e) => {
+                if (e.origin !== window.location.origin) return;
+                if (!e.data || e.data.type !== 'cloud_upload_result') return;
+                onedriveBtn.disabled = false;
+                if (e.data.success) {
+                    showCloudStatus('✅ Uploaded to OneDrive successfully!');
+                } else {
+                    showCloudStatus('❌ OneDrive upload failed: ' + e.data.message, true);
+                }
+            });
+
+            onedriveBtn.addEventListener('click', async () => {
+                if (!currentJobId) return;
+                onedriveBtn.disabled = true;
+                showCloudStatus('Opening OneDrive authentication…');
+
+                const csrfInput = document.querySelector('input[name=csrf_token]');
+                if (!csrfInput) { onedriveBtn.disabled = false; return; }
+                const csrfTokenVal = csrfInput.value;
+                try {
+                    const res = await fetch('api/cloud_upload.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: new URLSearchParams({
+                            action: 'auth_url',
+                            job_id: currentJobId,
+                            csrf_token: csrfTokenVal,
+                        }),
+                        credentials: 'same-origin',
+                    });
+                    const data = await res.json();
+                    if (!res.ok || data.error) {
+                        showCloudStatus('❌ ' + (data.error || 'Failed to start upload.'), true);
+                        onedriveBtn.disabled = false;
+                        return;
+                    }
+                    const popup = window.open(data.auth_url, 'onedrive_auth',
+                        'width=520,height=680,scrollbars=yes,resizable=yes');
+                    if (!popup) {
+                        showCloudStatus('❌ Popup blocked — please allow popups for this site and try again.', true);
+                        onedriveBtn.disabled = false;
+                    }
+                } catch (err) {
+                    showCloudStatus('❌ Network error — could not reach server.', true);
+                    onedriveBtn.disabled = false;
+                }
+            });
+
+            icloudBtn.addEventListener('click', async () => {
+                if (!currentJobId) return;
+                icloudBtn.disabled = true;
+
+                // Try the Web Share API with files — works on iOS/iPadOS/macOS Safari
+                // and allows the user to save directly to iCloud Drive via the Files app.
+                if (typeof navigator.canShare === 'function') {
+                    try {
+                        const response = await fetch(downloadBtn.href);
+                        if (response.ok) {
+                            const blob = await response.blob();
+                            const file = new File([blob], 'audiobook_' + currentJobId + '.wav', { type: 'audio/wav' });
+                            if (navigator.canShare({ files: [file] })) {
+                                await navigator.share({ files: [file], title: 'Audiobook' });
+                                showCloudStatus('✅ File shared — save it to iCloud Drive in the Files app.');
+                                icloudBtn.disabled = false;
+                                return;
+                            }
+                        }
+                    } catch (err) {
+                        if (err.name === 'AbortError') {
+                            // User cancelled the share sheet — not an error.
+                            icloudBtn.disabled = false;
+                            return;
+                        }
+                        // Fall through to the download fallback.
+                    }
+                }
+
+                // Fallback: trigger a regular download and guide the user.
+                showCloudStatus('ℹ️ Download the file and move it to your iCloud Drive folder to sync it across devices.');
+                downloadBtn.click();
+                icloudBtn.disabled = false;
+            });
         }());
     </script>
 </body>

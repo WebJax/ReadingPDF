@@ -199,8 +199,15 @@ $maxMb = 20;
         }
 
         @keyframes paneFade {
-            from { opacity: 0; transform: translateY(5px); }
-            to { opacity: 1; transform: translateY(0); }
+            from {
+                opacity: 0;
+                transform: translateY(5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
         #raw-text-input {
@@ -646,7 +653,7 @@ $maxMb = 20;
 
         <div id="usage-badge" class="usage-badge" style="display:none;">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
             <span>Brugt denne måned: <strong id="usage-text">...</strong></span>
         </div>
@@ -674,8 +681,10 @@ $maxMb = 20;
             </div>
 
             <div id="pane-text" class="input-pane">
-                <textarea id="raw-text-input" name="raw_text" placeholder="Indsæt artiklens tekst eller din bogtekst her..."></textarea>
-                <p style="text-align: center; font-size: .875rem; color: var(--muted); margin-top: .6rem; min-height: 1.25rem;">
+                <textarea id="raw-text-input" name="raw_text"
+                    placeholder="Indsæt artiklens tekst eller din bogtekst her..."></textarea>
+                <p
+                    style="text-align: center; font-size: .875rem; color: var(--muted); margin-top: .6rem; min-height: 1.25rem;">
                     Tekst indtastet her vil springe AI-fasen over og gå direkte til lyd.
                 </p>
             </div>
@@ -787,7 +796,7 @@ $maxMb = 20;
             </h2>
             <div class="result-stats" id="result-stats"></div>
             <audio id="audio-player" controls preload="auto"></audio>
-            
+
             <div class="download-container" style="display: flex; gap: 1rem; margin-top: 1rem;">
                 <a id="download-btn" class="primary-btn" download="audiobook.wav" href="#">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24"
@@ -797,8 +806,9 @@ $maxMb = 20;
                     </svg>
                     Download WAV
                 </a>
-                
-                <a id="download-text-btn" class="primary-btn" style="background: var(--surface-2); color: var(--text);" download="tekst.txt" href="#">
+
+                <a id="download-text-btn" class="primary-btn" style="background: var(--surface-2); color: var(--text);"
+                    download="tekst.txt" href="#">
                     <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24"
                         stroke="currentColor" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -813,16 +823,19 @@ $maxMb = 20;
                 <div class="cloud-btn-group">
                     <button id="onedrive-btn" class="cloud-btn" type="button" disabled>
                         <!-- Microsoft OneDrive icon -->
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                            <path d="M19.35 10.03A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.03A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.97z"/>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"
+                            fill="currentColor" aria-hidden="true">
+                            <path
+                                d="M19.35 10.03A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.03A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.97z" />
                         </svg>
                         OneDrive
                     </button>
                     <button id="icloud-btn" class="cloud-btn" type="button" disabled>
                         <!-- Cloud / iCloud icon -->
-                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24"
+                            stroke="currentColor" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/>
+                                d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z" />
                         </svg>
                         iCloud
                     </button>
@@ -830,7 +843,7 @@ $maxMb = 20;
                 <div id="cloud-upload-status" style="display:none;"></div>
             </div>
         </div>
-        
+
         <button id="resume-btn" type="button">Genoptag opgave</button>
 
         <button id="reset-btn" type="button">Convert another PDF</button>
@@ -860,16 +873,16 @@ $maxMb = 20;
             const resetBtn = $('reset-btn');
             const resumeBtn = $('resume-btn');
             const onedriveBtn = $('onedrive-btn');
-            const icloudBtn   = $('icloud-btn');
+            const icloudBtn = $('icloud-btn');
             const cloudStatus = $('cloud-upload-status');
 
             let currentJobId = null;
-            
+
             // Tab logic
             const tabBtns = document.querySelectorAll('.tab-btn');
             const inputPanes = document.querySelectorAll('.input-pane');
             let currentInputType = 'pdf'; // 'pdf' or 'text'
-            
+
             tabBtns.forEach(btn => {
                 btn.addEventListener('click', () => {
                     tabBtns.forEach(b => b.classList.remove('active'));
@@ -1047,7 +1060,7 @@ $maxMb = 20;
             uploadForm.addEventListener('submit', e => {
                 e.preventDefault();
                 hideError();
-                
+
                 if (currentInputType === 'pdf') {
                     if (!fileInput.files.length) { showError('Vælg en PDF fil først.'); return; }
                 } else {
@@ -1205,12 +1218,10 @@ $maxMb = 20;
                                 // Show result
                                 audioPlayer.src = job.audio_url;
                                 downloadBtn.href = job.audio_url;
-                                
+
+                                const finalName = fileInput.files.length ? fileInput.files[0].name.replace(/\.pdf$/i, '') : 'lydbog';
                                 downloadTextBtn.href = 'api/download_text.php?id=' + jobId;
-                                downloadTextBtn.download = dlName + '_tekst.txt';
-                                
-                                downloadTextBtn.href = 'api/download_text.php?id=' + jobId;
-                                downloadTextBtn.download = dlName + '_tekst.txt';
+                                downloadTextBtn.download = finalName + '_tekst.txt';
 
                                 // Show stats
                                 const totalSec = Math.round(job.elapsed);
@@ -1257,11 +1268,11 @@ $maxMb = 20;
                 resumeBtn.style.display = 'none';
                 hideError();
                 setUiState('loading');
-                
+
                 const jobId = resumeBtn.dataset.jobid;
                 const formData = new FormData();
                 formData.append('job_id', jobId);
-                
+
                 try {
                     const response = await fetch('api/resume.php', {
                         method: 'POST',

@@ -256,7 +256,7 @@ function extractTextFromPdf(string $pdfBase64, string $apiKey): array
             [
                 'parts' => [
                     ['inline_data' => ['mime_type' => 'application/pdf', 'data' => $pdfBase64]],
-                    ['text' => "Træk brødteksten ud fra dette PDF-dokument på originalsproget. Spring sidetal, bogtitler og standard headers/footers over. Sørg for at den faktiske fortælling eller faglige tekst bliver bevaret fyldestgørende. Teksten skal samles så den hænger naturligt sammen. Undgå at tilføje AI-kommentarer, returner kun selve teksten."]
+                    ['text' => "Træk al brødteksten ud fra dette PDF-dokument på originalsproget. Du SKAL udtrække AL tekst fra ALLE sider i dokumentet. Det er strengt forbudt at opsummere, forkorte, eller udelade noget af indholdet. Spring dog sidetal, bogtitler og standard headers/footers over. Sørg for at den fulde faktiske fortælling eller faglige tekst bliver bevaret fyldestgørende fra start til slut. Teksten skal samles så den hænger naturligt sammen. Undgå at tilføje AI-kommentarer, returner kun selve teksten."]
                 ]
             ]
         ],

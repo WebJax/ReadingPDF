@@ -690,9 +690,16 @@ $maxMb = 20;
             </div>
 
             <div class="settings-group">
-                <div class="setting-item">
+                <div class="setting-item" style="grid-column: 1 / -1;">
+                    <label for="tts-provider-select">TTS Udbyder</label>
+                    <select id="tts-provider-select" name="tts_provider">
+                        <option value="google" selected>Google Cloud TTS</option>
+                        <option value="openai">OpenAI TTS</option>
+                    </select>
+                </div>
+                <div class="setting-item" id="google-voice-item">
                     <label for="voice-select">Stemme</label>
-                    <select id="voice-select" name="voice">
+                    <select id="voice-select">
                         <option value="da-DK-Journey-D">Journey Mand (AI)</option>
                         <option value="da-DK-Journey-F">Journey Kvinde (AI)</option>
                         <option value="da-DK-Wavenet-C">Wavenet Mand</option>
@@ -700,6 +707,24 @@ $maxMb = 20;
                         <option value="da-DK-Wavenet-D">Wavenet Kvinde D</option>
                         <option value="da-DK-Standard-C" selected>Standard Mand</option>
                         <option value="da-DK-Standard-E">Standard Kvinde</option>
+                    </select>
+                </div>
+                <div class="setting-item" id="openai-voice-item" style="display:none;">
+                    <label for="openai-voice-select">Stemme</label>
+                    <select id="openai-voice-select">
+                        <option value="alloy">Alloy (neutral)</option>
+                        <option value="echo">Echo (mand)</option>
+                        <option value="fable">Fable (mand)</option>
+                        <option value="onyx">Onyx (mand)</option>
+                        <option value="nova" selected>Nova (kvinde)</option>
+                        <option value="shimmer">Shimmer (kvinde)</option>
+                    </select>
+                </div>
+                <div class="setting-item" id="openai-model-item" style="display:none;">
+                    <label for="openai-model-select">Kvalitet</label>
+                    <select id="openai-model-select" name="openai_model">
+                        <option value="tts-1" selected>Standard (tts-1)</option>
+                        <option value="tts-1-hd">HD (tts-1-hd)</option>
                     </select>
                 </div>
                 <div class="setting-item">
@@ -712,6 +737,8 @@ $maxMb = 20;
                     </select>
                 </div>
             </div>
+            <!-- Hidden field that mirrors the active voice select -->
+            <input type="hidden" id="voice-hidden" name="voice" value="da-DK-Standard-C">
 
             <button type="submit" id="convert-btn" disabled>Convert to Audiobook</button>
         </form>
@@ -877,6 +904,28 @@ $maxMb = 20;
             const cloudStatus = $('cloud-upload-status');
 
             let currentJobId = null;
+
+            // TTS provider toggle
+            const ttsProviderSelect = $('tts-provider-select');
+            const googleVoiceItem = $('google-voice-item');
+            const openaiVoiceItem = $('openai-voice-item');
+            const openaiModelItem = $('openai-model-item');
+            const voiceSelect = $('voice-select');
+            const openaiVoiceSelect = $('openai-voice-select');
+            const voiceHidden = $('voice-hidden');
+
+            function updateTtsProviderUi() {
+                const isOpenAi = ttsProviderSelect.value === 'openai';
+                googleVoiceItem.style.display = isOpenAi ? 'none' : '';
+                openaiVoiceItem.style.display = isOpenAi ? '' : 'none';
+                openaiModelItem.style.display = isOpenAi ? '' : 'none';
+                voiceHidden.value = isOpenAi ? openaiVoiceSelect.value : voiceSelect.value;
+            }
+
+            ttsProviderSelect.addEventListener('change', updateTtsProviderUi);
+            voiceSelect.addEventListener('change', () => { voiceHidden.value = voiceSelect.value; });
+            openaiVoiceSelect.addEventListener('change', () => { voiceHidden.value = openaiVoiceSelect.value; });
+            updateTtsProviderUi();
 
             // Tab logic
             const tabBtns = document.querySelectorAll('.tab-btn');

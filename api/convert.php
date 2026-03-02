@@ -49,6 +49,8 @@ if ($rawText !== '') {
 
 $voice = $_POST['voice'] ?? 'da-DK-Standard-C';
 $speed = (float) ($_POST['speed'] ?? 0.90);
+$ttsProvider = $_POST['tts_provider'] ?? 'google';
+$openaiModel = $_POST['openai_model'] ?? 'tts-1';
 
 // Initialize job state
 file_put_contents($jobPath, json_encode([
@@ -56,6 +58,8 @@ file_put_contents($jobPath, json_encode([
     'step' => 'queued',
     'voice' => $voice,
     'speed' => $speed,
+    'tts_provider' => $ttsProvider,
+    'openai_model' => $openaiModel,
     'created_at' => time(),
 ]));
 

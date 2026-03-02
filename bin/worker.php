@@ -28,6 +28,11 @@ if (!file_exists($configFile)) {
 }
 require_once $configFile;
 
+// Provide a safe default for OPENAI_API_KEY if not yet defined in config.php
+if (!defined('OPENAI_API_KEY')) {
+    define('OPENAI_API_KEY', '');
+}
+
 /**
  * Log a message to the worker log file.
  */
@@ -70,6 +75,8 @@ try {
     }
     $jobVoice = $jobData['voice'] ?? 'da-DK-Standard-C';
     $jobSpeed = (float) ($jobData['speed'] ?? 0.90);
+    $jobTtsProvider = $jobData['tts_provider'] ?? 'google';
+    $jobOpenaiModel = $jobData['openai_model'] ?? 'tts-1';
 
     // ── Step 1 : Extract text ──────────────────────────────────────────────
     updateJob($jobFile, ['step' => 'extracting', 'elapsed' => round(microtime(true) - $startTime, 2)]);
@@ -145,7 +152,9 @@ try {
                 'elapsed' => round(microtime(true) - $startTime, 2)
             ]);
 
-            $result = callCloudTts($chunk, GEMINI_API_KEY, $jobVoice, $jobSpeed);
+            $result = $jobTtsProvider === 'openai'
+                ? callOpenAiTts($chunk, OPENAI_API_KEY, $jobVoice, $jobSpeed, $jobOpenaiModel)
+                : callCloudTts($chunk, GEMINI_API_KEY, $jobVoice, $jobSpeed);
             if (!$result['success']) {
                 throw new Exception("TTS chunk {$chunkNum}/{$totalChunks} failed: " . $result['error']);
             }
@@ -293,6 +302,45 @@ function callCloudTts(string $text, string $apiKey, string $voice = 'da-DK-Stand
         ]
     ]);
     return geminiPost($url, $body, false);
+}
+
+function callOpenAiTts(string $text, string $apiKey, string $voice = 'alloy', float $speed = 1.0, string $model = 'tts-1'): array
+{
+    if (empty($apiKey)) {
+        return ['success' => false, 'error' => 'OpenAI API key is not configured.'];
+    }
+    $url = 'https://api.openai.com/v1/audio/speech';
+    $body = json_encode([
+        'model' => $model,
+        'input' => $text,
+        'voice' => $voice,
+        'response_format' => 'pcm',
+        'speed' => $speed
+    ]);
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $body,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $apiKey,
+        ],
+        CURLOPT_TIMEOUT => 180,
+        CURLOPT_CONNECTTIMEOUT => 30
+    ]);
+    $response = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($response === false) {
+        return ['success' => false, 'error' => 'cURL error'];
+    }
+    if ($httpCode !== 200) {
+        $data = json_decode($response, true);
+        return ['success' => false, 'error' => $data['error']['message'] ?? "HTTP {$httpCode}"];
+    }
+    // Response is raw PCM (24 kHz, 16-bit, mono) — ready to concatenate directly.
+    return ['success' => true, 'data' => $response];
 }
 
 function geminiPost(string $url, string $jsonBody, bool $isText): array

@@ -3,6 +3,11 @@
 // config.php is listed in .gitignore and must NEVER be committed.
 define('GEMINI_API_KEY', 'YOUR_GEMINI_API_KEY_HERE');
 
+// ── OpenAI API ────────────────────────────────────────────────────────────────
+// Get your API key at https://platform.openai.com/api-keys
+// Leave blank ('') to disable OpenAI TTS as an option.
+define('OPENAI_API_KEY', '');
+
 // ── OneDrive / Microsoft Graph API ───────────────────────────────────────────
 // Register an app at https://portal.azure.com (Azure Active Directory → App registrations).
 // Required API permission: Files.ReadWrite (Microsoft Graph, Delegated).

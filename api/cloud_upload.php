@@ -130,7 +130,7 @@ function handleOAuthCallback(
     // Provider returned an error.
     if (isset($_GET['error'])) {
         $desc = $_GET['error_description'] ?? $_GET['error'];
-        renderResult(false, htmlspecialchars($desc, ENT_QUOTES, 'UTF-8'));
+        renderResult(false, (string) $desc);
         return;
     }
 
@@ -168,7 +168,7 @@ function handleOAuthCallback(
 
     if (empty($tokenData['access_token'])) {
         $err = $tokenData['error_description'] ?? $tokenData['error'] ?? 'Token exchange failed.';
-        renderResult(false, htmlspecialchars($err, ENT_QUOTES, 'UTF-8'));
+        renderResult(false, (string) $err);
         return;
     }
 
@@ -181,12 +181,44 @@ function handleOAuthCallback(
         return;
     }
 
-    // Upload to OneDrive — Microsoft Graph simple upload (≤ 4 MB per the simple PUT
-    // endpoint; files larger than that require an upload session via the Graph API).
-    // WAV files from a typical audiobook are well within this limit.
-    $filename  = 'audiobook_' . $jobId . '_' . date('Y-m-d_His') . '.wav';
-    $uploadUrl = "https://graph.microsoft.com/v1.0/me/drive/root:/Audiobooks/{$filename}:/content";
+    // Upload to OneDrive using an upload session (Microsoft Graph resumable upload).
+    // This supports files of any size and is the recommended approach for WAV files,
+    // which can easily exceed the ~4 MB simple-upload limit.
+    $filename      = 'audiobook_' . $jobId . '_' . date('Y-m-d_His') . '.wav';
+    $fileSize      = filesize($audioPath);
+    $createSession = "https://graph.microsoft.com/v1.0/me/drive/root:/Audiobooks/{$filename}:/createUploadSession";
 
+    // Step 1: create the upload session.
+    $sessionCh = curl_init($createSession);
+    curl_setopt_array($sessionCh, [
+        CURLOPT_POST           => true,
+        CURLOPT_POSTFIELDS     => json_encode(['item' => ['@microsoft.graph.conflictBehavior' => 'rename']]),
+        CURLOPT_HTTPHEADER     => [
+            'Authorization: Bearer ' . $accessToken,
+            'Content-Type: application/json',
+        ],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 30,
+    ]);
+    $sessionBody   = curl_exec($sessionCh);
+    $sessionStatus = (int) curl_getinfo($sessionCh, CURLINFO_HTTP_CODE);
+    curl_close($sessionCh);
+
+    if ($sessionStatus < 200 || $sessionStatus >= 300) {
+        $sessErr = json_decode((string) $sessionBody, true);
+        $sessMsg = $sessErr['error']['message'] ?? "Failed to create upload session (HTTP {$sessionStatus}).";
+        renderResult(false, (string) $sessMsg);
+        return;
+    }
+
+    $sessionData  = json_decode((string) $sessionBody, true);
+    $uploadUrl    = $sessionData['uploadUrl'] ?? '';
+    if (!$uploadUrl) {
+        renderResult(false, 'OneDrive did not return an upload URL.');
+        return;
+    }
+
+    // Step 2: upload the file in a single chunk (the session supports up to 250 GB).
     $fh = fopen($audioPath, 'rb');
     if ($fh === false) {
         renderResult(false, 'Failed to read audio file.');
@@ -197,13 +229,14 @@ function handleOAuthCallback(
     curl_setopt_array($ch, [
         CURLOPT_PUT            => true,
         CURLOPT_INFILE         => $fh,
-        CURLOPT_INFILESIZE     => filesize($audioPath),
+        CURLOPT_INFILESIZE     => $fileSize,
         CURLOPT_HTTPHEADER     => [
-            'Authorization: Bearer ' . $accessToken,
+            'Content-Length: ' . $fileSize,
+            'Content-Range: bytes 0-' . ($fileSize - 1) . '/' . $fileSize,
             'Content-Type: audio/wav',
         ],
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 120, // 2 minutes — generous for large WAV files.
+        CURLOPT_TIMEOUT        => 300, // 5 minutes for large uploads.
     ]);
 
     $body   = curl_exec($ch);
@@ -218,7 +251,7 @@ function handleOAuthCallback(
     } else {
         $errData = json_decode((string) $body, true);
         $errMsg  = $errData['error']['message'] ?? "Upload failed (HTTP {$status}).";
-        renderResult(false, htmlspecialchars($errMsg, ENT_QUOTES, 'UTF-8'));
+        renderResult(false, (string) $errMsg);
     }
 }
 
@@ -226,6 +259,7 @@ function handleOAuthCallback(
 
 /**
  * HTTP POST helper using cURL; returns the decoded JSON response as an array.
+ * On network or HTTP errors the returned array contains an 'error' key.
  *
  * @param array<string,string> $data
  * @return array<string,mixed>
@@ -240,28 +274,53 @@ function httpPost(string $url, array $data): array
         CURLOPT_TIMEOUT        => 30,
         CURLOPT_HTTPHEADER     => ['Content-Type: application/x-www-form-urlencoded'],
     ]);
-    $body = curl_exec($ch);
+    $body      = curl_exec($ch);
+    $curlErrNo = curl_errno($ch);
+    $curlErr   = $curlErrNo !== 0 ? curl_error($ch) : '';
+    $httpCode  = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    return json_decode((string) ($body ?: '{}'), true) ?: [];
+
+    $decoded = ($body !== false) ? (json_decode((string) $body, true) ?: []) : [];
+
+    if ($curlErrNo !== 0 || $body === false) {
+        $msg = $curlErr ?: 'cURL request failed';
+        return ['error' => 'network_error', 'error_description' => $msg];
+    }
+
+    if ($httpCode >= 400) {
+        // Merge any server-provided error fields with a fallback.
+        return array_merge(
+            ['error' => "HTTP {$httpCode}", 'error_description' => "HTTP error {$httpCode}"],
+            is_array($decoded) ? $decoded : []
+        );
+    }
+
+    return is_array($decoded) ? $decoded : [];
 }
 
 /**
  * Renders a small self-contained HTML result page shown inside the popup.
  * It also sends a postMessage to the opener so the parent page can react.
+ *
+ * @param string $message Raw (unescaped) human-readable message. Escaping for
+ *                        HTML output is done inside this function; the raw string
+ *                        is used for the postMessage payload.
  */
 function renderResult(bool $success, string $message, ?string $webUrl = null): void
 {
-    $icon    = $success ? '✅' : '❌';
-    $color   = $success ? '#4ade80' : '#ff5c5c';
-    $linkHtml = '';
+    $icon       = $success ? '✅' : '❌';
+    $color      = $success ? '#4ade80' : '#ff5c5c';
+    $safeMsg    = htmlspecialchars($message, ENT_QUOTES, 'UTF-8');
+    $linkHtml   = '';
     if ($success && $webUrl !== null) {
         $safeUrl  = htmlspecialchars($webUrl, ENT_QUOTES, 'UTF-8');
         $linkHtml = '<br><a href="' . $safeUrl . '" target="_blank" '
             . 'style="color:#6c7cff;margin-top:.5rem;display:inline-block;">'
             . 'Open in OneDrive →</a>';
     }
+    // Raw values for JSON/JS context; json_encode handles escaping.
     $jsonSuccess = $success ? 'true' : 'false';
-    $jsonMessage = json_encode($message);
+    $jsonMessage = json_encode($message);   // uses raw $message intentionally
     $jsonWebUrl  = json_encode($webUrl);
     ?>
 <!DOCTYPE html>
@@ -302,7 +361,7 @@ function renderResult(bool $success, string $message, ?string $webUrl = null): v
 <body>
 <div class="box">
     <div class="icon"><?= $icon ?></div>
-    <div class="msg"><?= $message ?><?= $linkHtml ?></div>
+    <div class="msg"><?= $safeMsg ?><?= $linkHtml ?></div>
     <button class="close" onclick="window.close()">Close</button>
 </div>
 <script>

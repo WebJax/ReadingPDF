@@ -811,14 +811,14 @@ $maxMb = 20;
             <div class="cloud-upload-section">
                 <p class="cloud-upload-label">☁️ Save to cloud storage</p>
                 <div class="cloud-btn-group">
-                    <button id="onedrive-btn" class="cloud-btn" type="button">
+                    <button id="onedrive-btn" class="cloud-btn" type="button" disabled>
                         <!-- Microsoft OneDrive icon -->
                         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                             <path d="M19.35 10.03A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.03A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.97z"/>
                         </svg>
                         OneDrive
                     </button>
-                    <button id="icloud-btn" class="cloud-btn" type="button">
+                    <button id="icloud-btn" class="cloud-btn" type="button" disabled>
                         <!-- Cloud / iCloud icon -->
                         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
@@ -1245,6 +1245,9 @@ $maxMb = 20;
                 fileNameEl.textContent = '';
                 convertBtn.disabled = true;
                 currentJobId = null;
+                onedriveBtn.disabled = true;
+                icloudBtn.disabled = true;
+                cloudStatus.textContent = '';
                 cloudStatus.style.display = 'none';
                 hideError();
                 setUiState('idle');
@@ -1329,10 +1332,13 @@ $maxMb = 20;
                 cloudStatus.style.color = isError ? 'var(--danger)' : 'var(--success)';
             }
 
+            let onedrivePopupHandled = false;
+
             // Listen for result messages sent back from the OAuth popup window.
             window.addEventListener('message', (e) => {
                 if (e.origin !== window.location.origin) return;
                 if (!e.data || e.data.type !== 'cloud_upload_result') return;
+                onedrivePopupHandled = true;
                 onedriveBtn.disabled = false;
                 if (e.data.success) {
                     showCloudStatus('✅ Uploaded to OneDrive successfully!');
@@ -1371,7 +1377,20 @@ $maxMb = 20;
                     if (!popup) {
                         showCloudStatus('❌ Popup blocked — please allow popups for this site and try again.', true);
                         onedriveBtn.disabled = false;
+                        return;
                     }
+                    // Poll for popup closure so we can re-enable the button if the
+                    // user dismisses the window before auth completes.
+                    onedrivePopupHandled = false;
+                    const closedPoll = setInterval(() => {
+                        if (popup.closed) {
+                            clearInterval(closedPoll);
+                            if (!onedrivePopupHandled) {
+                                onedriveBtn.disabled = false;
+                                showCloudStatus('OneDrive sign-in was cancelled. You can try again.', true);
+                            }
+                        }
+                    }, 500);
                 } catch (err) {
                     showCloudStatus('❌ Network error — could not reach server.', true);
                     onedriveBtn.disabled = false;

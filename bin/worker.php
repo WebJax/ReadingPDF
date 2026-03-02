@@ -61,6 +61,7 @@ try {
 
     $pdfBytes = file_get_contents($pdfPath);
     $pdfBase64 = base64_encode($pdfBytes);
+    $estimatedPageCount = estimatePdfPageCount($pdfBytes);
 
     // Read job config for voice options
     $jobData = [];
@@ -95,6 +96,11 @@ try {
     }
 
     $charCount = mb_strlen($extractedText);
+    $extractionWarning = buildExtractionWarning($estimatedPageCount, $charCount);
+
+    if ($extractionWarning !== null) {
+        logMessage($logFile, "[$jobId] Warning: {$extractionWarning}");
+    }
 
     // Track usage
     $usageFile = "{$baseDir}/storage/usage.json";
@@ -109,6 +115,9 @@ try {
     updateJob($jobFile, [
         'step' => 'extracted',
         'charCount' => $charCount,
+        'estimatedPages' => $estimatedPageCount,
+        'charsPerPage' => $estimatedPageCount > 0 ? round($charCount / $estimatedPageCount, 1) : null,
+        'warning' => $extractionWarning,
         'totalChunks' => $totalChunks,
         'elapsed' => round(microtime(true) - $startTime, 2)
     ]);
@@ -260,7 +269,10 @@ function extractTextFromPdf(string $pdfBase64, string $apiKey): array
                 ]
             ]
         ],
-        'generationConfig' => ['maxOutputTokens' => 8192, 'temperature' => 0.1]
+        'generationConfig' => [
+            'maxOutputTokens' => 65535,
+            'temperature' => 0.1
+        ]
     ]);
     return geminiPost($url, $body, true);
 }
@@ -317,7 +329,87 @@ function geminiPost(string $url, string $jsonBody, bool $isText): array
 
 function splitTextIntoChunks(string $text, int $maxLen): array
 {
-    return preg_split('/(?<=[.!?])\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
+    $sentences = preg_split('/(?<=[.!?])\s+/u', trim($text), -1, PREG_SPLIT_NO_EMPTY);
+    if (!$sentences || count($sentences) === 0) {
+        return [];
+    }
+
+    $chunks = [];
+    $currentChunk = '';
+
+    foreach ($sentences as $sentence) {
+        $sentence = trim($sentence);
+        if ($sentence === '') {
+            continue;
+        }
+
+        // If a single sentence is longer than maxLen, force-split it safely.
+        if (mb_strlen($sentence) > $maxLen) {
+            if ($currentChunk !== '') {
+                $chunks[] = $currentChunk;
+                $currentChunk = '';
+            }
+
+            $offset = 0;
+            $sentenceLen = mb_strlen($sentence);
+            while ($offset < $sentenceLen) {
+                $piece = mb_substr($sentence, $offset, $maxLen);
+                $chunks[] = $piece;
+                $offset += mb_strlen($piece);
+            }
+            continue;
+        }
+
+        $candidate = $currentChunk === '' ? $sentence : ($currentChunk . ' ' . $sentence);
+        if (mb_strlen($candidate) <= $maxLen) {
+            $currentChunk = $candidate;
+        } else {
+            if ($currentChunk !== '') {
+                $chunks[] = $currentChunk;
+            }
+            $currentChunk = $sentence;
+        }
+    }
+
+    if ($currentChunk !== '') {
+        $chunks[] = $currentChunk;
+    }
+
+    return $chunks;
+}
+
+function estimatePdfPageCount(string $pdfBytes): int
+{
+    if ($pdfBytes === '') {
+        return 0;
+    }
+
+    $matches = [];
+    preg_match_all('/\/Type\s*\/Page\b/', $pdfBytes, $matches);
+    $count = isset($matches[0]) ? count($matches[0]) : 0;
+
+    return max(0, $count);
+}
+
+function buildExtractionWarning(int $estimatedPageCount, int $charCount): ?string
+{
+    if ($estimatedPageCount < 5) {
+        return null;
+    }
+
+    $minCharsPerPage = 250;
+    $charsPerPage = $charCount / max(1, $estimatedPageCount);
+
+    if ($charsPerPage >= $minCharsPerPage) {
+        return null;
+    }
+
+    return sprintf(
+        'Mulig afkortet tekst: ~%d sider men kun %d tegn (ca. %.1f tegn/side). Prøv konvertering igen eller del PDF i mindre dele.',
+        $estimatedPageCount,
+        $charCount,
+        $charsPerPage
+    );
 }
 
 function buildWavFile(string $pcmData): string

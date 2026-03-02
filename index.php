@@ -1147,9 +1147,13 @@ $maxMb = 20;
                             case 'extracted':
                                 completeStep('extract');
                                 totalChunks = job.totalChunks || 1;
-                                detailEls.extract.textContent =
+                                let extractText =
                                     formatNumber(job.charCount) + ' characters · ' +
                                     totalChunks + ' audio chunk' + (totalChunks !== 1 ? 's' : '');
+                                if (job.warning) {
+                                    extractText += ' · ⚠ ' + job.warning;
+                                }
+                                detailEls.extract.textContent = extractText;
                                 setOverallProgress(30);
                                 break;
 
@@ -1229,7 +1233,8 @@ $maxMb = 20;
                                 resultStats.innerHTML =
                                     '<span>⏱ ' + formatTime(totalSec) + ' total</span>' +
                                     '<span>📦 ' + audioSizeMb + ' MB</span>' +
-                                    (job.totalChunks > 1 ? '<span>🔊 ' + job.totalChunks + ' chunks</span>' : '');
+                                    (job.totalChunks > 1 ? '<span>🔊 ' + job.totalChunks + ' chunks</span>' : '') +
+                                    (job.warning ? '<span>⚠ ' + job.warning + '</span>' : '');
 
                                 setUiState('done');
                                 return; // Stop polling

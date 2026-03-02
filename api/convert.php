@@ -49,8 +49,16 @@ if ($rawText !== '') {
 
 $voice = $_POST['voice'] ?? 'da-DK-Standard-C';
 $speed = (float) ($_POST['speed'] ?? 0.90);
-$ttsProvider = $_POST['tts_provider'] ?? 'google';
-$openaiModel = $_POST['openai_model'] ?? 'tts-1';
+
+$allowedProviders = ['google', 'openai'];
+$ttsProvider = in_array($_POST['tts_provider'] ?? '', $allowedProviders, true)
+    ? $_POST['tts_provider']
+    : 'google';
+
+$allowedOpenaiModels = ['tts-1', 'tts-1-hd'];
+$openaiModel = in_array($_POST['openai_model'] ?? '', $allowedOpenaiModels, true)
+    ? $_POST['openai_model']
+    : 'tts-1';
 
 // Initialize job state
 file_put_contents($jobPath, json_encode([

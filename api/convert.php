@@ -60,6 +60,8 @@ $openaiModel = in_array($_POST['openai_model'] ?? '', $allowedOpenaiModels, true
     ? $_POST['openai_model']
     : 'tts-1';
 
+$textOnly = ($_POST['text_only'] ?? '') === 'true';
+
 // Initialize job state
 file_put_contents($jobPath, json_encode([
     'id' => $jobId,
@@ -68,6 +70,7 @@ file_put_contents($jobPath, json_encode([
     'speed' => $speed,
     'tts_provider' => $ttsProvider,
     'openai_model' => $openaiModel,
+    'text_only' => $textOnly,
     'created_at' => time(),
 ]));
 

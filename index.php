@@ -538,6 +538,31 @@ $maxMb = 20;
             box-shadow: 0 4px 15px rgba(108, 124, 255, .3);
         }
 
+        #download-text-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: .5rem;
+            width: 100%;
+            padding: .7rem;
+            border: 2px solid var(--muted);
+            border-radius: var(--radius);
+            background: transparent;
+            color: var(--muted);
+            font-size: .95rem;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: background .2s, color .2s, box-shadow .2s;
+            margin-top: 0.75rem;
+        }
+
+        #download-text-btn:hover {
+            border-color: var(--text);
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
         /* ── Error ── */
         #error-section {
             margin-top: 1.25rem;
@@ -736,6 +761,14 @@ $maxMb = 20;
                         <option value="1.10">Lidt hurtigere</option>
                     </select>
                 </div>
+            </div>
+
+            <!-- Text-only checkbox -->
+            <div style="margin-top: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                <input type="checkbox" id="text-only-checkbox" name="text_only" value="true"
+                    style="width: 18px; height: 18px; cursor: pointer;">
+                <label for="text-only-checkbox" style="font-size: 0.9rem; cursor: pointer; color: var(--muted);">Kun
+                    tekst (ingen lyd)</label>
             </div>
             <!-- Hidden field that mirrors the active voice select -->
             <input type="hidden" id="voice-hidden" name="voice" value="da-DK-Standard-C">
@@ -1116,7 +1149,13 @@ $maxMb = 20;
                     if ($('raw-text-input').value.trim() === '') { showError('Indsæt venligst noget tekst i feltet.'); return; }
                 }
 
-                startConversion(new FormData(uploadForm));
+                const formData = new FormData(uploadForm);
+                const isTextOnly = $('text-only-checkbox').checked;
+                if (isTextOnly) {
+                    formData.set('text_only', 'true');
+                }
+
+                startConversion(formData);
             });
 
             async function startConversion(formData) {
@@ -1185,6 +1224,8 @@ $maxMb = 20;
                             setUiState('error');
                             return;
                         }
+
+                        const isTextOnlyJob = job.text_only || false;
 
                         switch (job.step) {
                             case 'extracting':
@@ -1269,8 +1310,34 @@ $maxMb = 20;
                                 cloudStatus.style.display = 'none';
 
                                 // Show result
-                                audioPlayer.src = job.audio_url;
-                                downloadBtn.href = job.audio_url;
+                                if (isTextOnlyJob) {
+                                    audioPlayer.style.display = 'none';
+                                    downloadBtn.style.display = 'none';
+                                    $('result-section').querySelector('h2').innerHTML = `
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        Teksten er nu udtrukket!
+                                    `;
+                                    // Make text button more prominent
+                                    downloadTextBtn.style.border = '2px solid var(--primary)';
+                                    downloadTextBtn.style.color = 'var(--primary)';
+                                    downloadTextBtn.style.background = 'transparent';
+                                } else {
+                                    audioPlayer.style.display = 'block';
+                                    downloadBtn.style.display = 'flex';
+                                    audioPlayer.src = job.audio_url;
+                                    downloadBtn.href = job.audio_url;
+                                    $('result-section').querySelector('h2').innerHTML = `
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                                        </svg>
+                                        Your audiobook is ready!
+                                    `;
+                                    downloadTextBtn.style.border = '2px solid var(--muted)';
+                                    downloadTextBtn.style.color = 'var(--muted)';
+                                    downloadTextBtn.style.background = 'transparent';
+                                }
 
                                 const finalName = fileInput.files.length ? fileInput.files[0].name.replace(/\.pdf$/i, '') : 'lydbog';
                                 downloadTextBtn.href = 'api/download_text.php?id=' + jobId;
@@ -1278,12 +1345,16 @@ $maxMb = 20;
 
                                 // Show stats
                                 const totalSec = Math.round(job.elapsed);
-                                const audioSizeMb = (job.audio_size / (1024 * 1024)).toFixed(1);
-                                resultStats.innerHTML =
-                                    '<span>⏱ ' + formatTime(totalSec) + ' total</span>' +
-                                    '<span>📦 ' + audioSizeMb + ' MB</span>' +
-                                    (job.totalChunks > 1 ? '<span>🔊 ' + job.totalChunks + ' chunks</span>' : '') +
-                                    (job.warning ? '<span>⚠ ' + job.warning + '</span>' : '');
+                                if (isTextOnlyJob) {
+                                    resultStats.innerHTML = '<span>⏱ ' + formatTime(totalSec) + ' total</span>';
+                                } else {
+                                    const audioSizeMb = (job.audio_size / (1024 * 1024)).toFixed(1);
+                                    resultStats.innerHTML =
+                                        '<span>⏱ ' + formatTime(totalSec) + ' total</span>' +
+                                        '<span>📦 ' + audioSizeMb + ' MB</span>' +
+                                        (job.totalChunks > 1 ? '<span>🔊 ' + job.totalChunks + ' chunks</span>' : '') +
+                                        (job.warning ? '<span>⚠ ' + job.warning + '</span>' : '');
+                                }
 
                                 setUiState('done');
                                 return; // Stop polling

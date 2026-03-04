@@ -77,6 +77,7 @@ try {
     $jobSpeed = (float) ($jobData['speed'] ?? 0.90);
     $jobTtsProvider = $jobData['tts_provider'] ?? 'google';
     $jobOpenaiModel = $jobData['openai_model'] ?? 'tts-1';
+    $jobTextOnly = $jobData['text_only'] ?? false;
 
     // ── Step 1 : Extract text ──────────────────────────────────────────────
     updateJob($jobFile, ['step' => 'extracting', 'elapsed' => round(microtime(true) - $startTime, 2)]);
@@ -128,6 +129,17 @@ try {
         'totalChunks' => $totalChunks,
         'elapsed' => round(microtime(true) - $startTime, 2)
     ]);
+
+    // ── Text-only shortcut ────────────────────────────────────────────────
+    if ($jobTextOnly) {
+        updateJob($jobFile, [
+            'step' => 'done',
+            'text_url' => "api/download_text.php?id={$jobId}",
+            'elapsed' => round(microtime(true) - $startTime, 2)
+        ]);
+        logMessage($logFile, "[$jobId] Text-only job completed successfully.");
+        exit(0);
+    }
 
     // ── Step 2 : TTS ───────────────────────────────────────────────────────
     $chunkDir = "{$baseDir}/storage/jobs/{$jobId}_chunks";
